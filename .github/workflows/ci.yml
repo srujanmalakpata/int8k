@@ -71,8 +71,10 @@ jobs:
         include:
           - name: ASan + UBSan
             preset: asan
+            test_preset: asan-linux
           - name: ThreadSanitizer
             preset: tsan
+            test_preset: tsan
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -85,7 +87,7 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
       - name: Test
-        run: ctest --preset ${{ matrix.preset }} --parallel 4
+        run: ctest --preset ${{ matrix.test_preset }} --parallel 4
 
   arm64-cross:
     name: Linux aarch64 cross-build (portable kernels, tests under QEMU)

@@ -1,10 +1,79 @@
 # int8k
 
-C++20 library and CLI for INT8/INT4 quantization and CPU GEMV/GEMM inference kernels.
+C++20 library and CLI for INT8/INT4 quantization and CPU GEMV/GEMM inference kernels with runtime AVX2 dispatch and an independent numerical oracle.
 
-Supports symmetric per-row INT8 and block-wise INT4 (Q4_0-style) weight quantization,
-quantized matrix-vector products (GEMV), and small matrix-matrix products (GEMM). Kernels use
-runtime AVX2 dispatch on x86, portable scalar code elsewhere, and an optional threaded row split.
+[![CI](https://github.com/srujanmalakpata/int8k/actions/workflows/ci.yml/badge.svg)](https://github.com/srujanmalakpata/int8k/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](CMakeLists.txt)
+
+## Highlights
+
+- **Measured GEMV speedups**: INT4 AVX2 4.7–9.2x and INT8 AVX2 2.3–4.9x versus the AVX2 float32 baseline on the two MLP shapes below ([benchmark record](VERIFICATION.md#benchmarks)).
+- **Compact weights**: 4096x4096 INT4 weights occupy 10,485,760 bytes including scales, a 6.40x reduction from float32; INT8 reduces storage 4.00x ([CLI measurements](VERIFICATION.md#cli-output-release-build)).
+- **Independent correctness checks**: `Gemv.MatchesExactOracleAtLlmWidths` compares kernels against a float64 dequantized oracle; 180 parameterized cases cover 60 boundary and randomized shapes ([test record](VERIFICATION.md#summary)).
+- **Mutation-tested failure detection**: all six patches are caught on the recorded Linux AVX2 host, covering nibble order, rounding, tails, dispatch and row splitting ([mutation results](VERIFICATION.md#mutation-testing)).
+- **Deterministic threading**: `Gemv.ThreadedIsBitIdenticalToSingleThreaded` enforces identical output across thread counts, and direct splitter tests verify OS thread use and exception propagation ([test record](VERIFICATION.md#summary)).
+
+Headline benchmark: shared **4-vCPU Ubuntu 24.04 container, Intel Xeon @ 2.80 GHz,
+AVX2/FMA, 33 MiB L3**, recorded 2026-10-03. Cells show run 1 / run 2; each is a median
+of 15 repetitions after two warmups. Kernels are single-threaded; quantized times include
+activation quantization. Heavy concurrent load made absolute timings noisy.
+
+| Shape (out x in) | f32 AVX2 GEMV | INT8 AVX2 GEMV | INT4 AVX2 GEMV | INT8 vs f32 | INT4 vs f32 |
+|---|---|---|---|---|---|
+| 11008x4096 (MLP up/gate) | 33.1 / 25.2 ms | 6.80 / 10.82 ms | 3.59 / 3.86 ms | 4.9x / 2.3x | 9.2x / 6.5x |
+| 4096x11008 (MLP down) | 34.5 / 24.1 ms | 9.64 / 7.07 ms | 5.79 / 5.10 ms | 3.6x / 3.4x | 6.0x / 4.7x |
+
+Source: [VERIFICATION.md](VERIFICATION.md#benchmarks). These are synthetic workloads;
+rerun on an idle host before quoting latency. Native Apple silicon validation below exercises
+the scalar path and does not reproduce these AVX2 measurements.
+
+**Tech stack:** C++20, AVX2/FMA intrinsics, `std::thread`, CMake/Ninja, GoogleTest,
+ASan/UBSan/TSan, GitHub Actions.
+
+```mermaid
+flowchart LR
+    W[Float32 weights] --> Q[Offline quantization]
+    Q --> I[INT8 codes + per-row scales]
+    Q --> P[Pack two INT4 codes per byte + block scales]
+    X[Float32 activations] --> A[Quantize to INT8 blocks + scales]
+    I --> D[Validate buffers and dispatch backend]
+    P --> D
+    A --> D
+    D --> R[Split output rows across threads]
+    R --> S[Portable scalar GEMV / GEMM]
+    R --> V[AVX2 / FMA GEMV / GEMM]
+    S --> Y[Int32 block dots scaled to float32 output]
+    V --> Y
+```
+
+## Quickstart
+
+Requires Git, CMake ≥ 3.24 for the download fallback, Ninja and a C++20 compiler
+(GCC 13.3, Clang 18.1 and AppleClang 21 have recorded checks). GoogleTest 1.14 is fetched
+if no installed GoogleTest is found; that step needs network access. With an installed
+GoogleTest, CMake ≥ 3.21 is sufficient.
+
+```bash
+git clone https://github.com/srujanmalakpata/int8k.git && cd int8k
+cmake --preset release -DINT8K_FETCH_GTEST=ON
+cmake --build --preset release --parallel
+ctest --preset release --parallel 4
+./build/release/int8k-cli selfcheck --rows 513 --cols 4100 --threads 4
+./build/release/int8k-bench --quick --reps 3 --threads 2
+```
+
+Expected: CTest reports zero failures and the CLI ends with `selfcheck: PASS`.
+Two existing AVX2-only tests skip on hosts without AVX2. Use
+`./build/release/int8k-cli quantize --rows 4096 --cols 4096 --format q4` to inspect storage
+and reconstruction error, or omit `--quick` from the benchmark for the full shape table.
+
+**Validation:** validated locally, never deployed; no real-model accuracy or production usage
+is claimed. [VERIFICATION.md](VERIFICATION.md#native-macos-validation-2026-10-03) records
+current commands, results and sandbox limits separately from the earlier Linux measurements.
+
+Contents: [Features](#features) · [Architecture](#architecture) · [Testing](#testing) ·
+[Results](#results) · [Limitations](#limitations) · [License](#license)
 
 ## Features
 
@@ -24,8 +93,8 @@ runtime AVX2 dispatch on x86, portable scalar code elsewhere, and an optional th
   uses `__builtin_cpu_supports("avx2")` and `("fma")` at runtime. The x86 code is compiled only
   when the `INT8K_X86` macro in `src/kernels.hpp` is 1 (x86-64 or i386 with GCC/Clang), so the
   same source builds with the portable kernels elsewhere. The `arm64-cross` preset
-  cross-compiles for aarch64 Linux and runs the tests under `qemu-aarch64`. The recorded Linux
-  test environment has no macOS host; the macOS CI job is configured but has not run on GitHub.
+  cross-compiles for aarch64 Linux and runs the tests under `qemu-aarch64`. Native Apple silicon
+  builds are also covered by the dated macOS checks in [VERIFICATION.md](VERIFICATION.md#native-macos-validation-2026-10-03).
 - **Threads**: `KernelOptions::threads` splits output rows across `std::thread`s (capped at 4x
   the hardware threads). Output is bit-identical for any thread count, a test checks this, and
   the suite runs clean under ThreadSanitizer.
@@ -46,23 +115,8 @@ runtime AVX2 dispatch on x86, portable scalar code elsewhere, and an optional th
     -Wsign-conversion` on library code).
   - ASan+UBSan and ThreadSanitizer builds, clang-format check, GoogleTest, six
     mutation patches with a runner script, and a GitHub Actions CI workflow configured for gcc,
-    clang, both sanitizers, the aarch64 cross-build, the mutation run and macOS. It has been
-    linted but has not run on GitHub yet.
-
-## Quick start
-
-Requirements: CMake ≥ 3.21, Ninja, a C++20 compiler (tested with GCC 13.3 and Clang 18.1), and
-GoogleTest (`sudo apt-get install libgtest-dev` or `brew install googletest`). Without a system
-GoogleTest, configure with `-DINT8K_FETCH_GTEST=ON` to download it.
-
-```bash
-cmake --preset release
-cmake --build --preset release -j
-./build/release/int8k-cli info
-./build/release/int8k-cli quantize --rows 4096 --cols 4096 --format q4
-./build/release/int8k-cli selfcheck --rows 513 --cols 4100 --threads 4
-./build/release/int8k-bench --threads 4          # full LLM-shape table (~20 s)
-```
+    clang, both sanitizers, the aarch64 cross-build, the mutation run and macOS. Local validation
+    is recorded in [VERIFICATION.md](VERIFICATION.md); hosted execution is not verified by that record.
 
 Library use:
 
@@ -107,14 +161,15 @@ A call to `gemv(w, x, y, opts)` runs in this order:
 ## Testing
 
 ```bash
-ctest --preset release            # 244 GoogleTest tests + 15 CLI/bench end-to-end tests
-cmake --preset asan && cmake --build --preset asan && ctest --preset asan   # ASan + UBSan
-cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan   # ThreadSanitizer
-cmake --preset portable && cmake --build --preset portable && ctest --preset portable
+ctest --preset release            # 244 GoogleTest tests + 16 CLI/bench end-to-end tests
+cmake --preset asan -DINT8K_FETCH_GTEST=ON && cmake --build --preset asan && ctest --preset asan
+# Linux only: ctest --preset asan-linux adds explicit leak detection
+cmake --preset tsan -DINT8K_FETCH_GTEST=ON && cmake --build --preset tsan && ctest --preset tsan   # ThreadSanitizer
+cmake --preset portable -DINT8K_FETCH_GTEST=ON && cmake --build --preset portable && ctest --preset portable
 # aarch64 Linux cross-build, tests run under QEMU
 # (needs g++-aarch64-linux-gnu, qemu-user and libgtest-dev's /usr/src/googletest)
 cmake --preset arm64-cross && cmake --build --preset arm64-cross && ctest --preset arm64-cross
-find include src tests bench tools -name '*.[ch]pp' | xargs clang-format --dry-run --Werror
+find include src tests bench tools -name '*.[ch]pp' | xargs clang-format-18 --dry-run --Werror
 tools/mutations/run_mutations.sh  # every mutation patch must make tests fail
 ```
 
@@ -149,7 +204,8 @@ not prove correctness for all inputs. The suite contains:
   NaN/Inf, NaN scales in hand-built structs (a weight scale poisons one row, an activation
   scale every row), and underflowing scale products.
 - **CLI end-to-end tests** run through CTest. The rejection tests require exit code 2 and the
-  specific error message.
+  specific error message. `bench.baseline_self_ratio` checks that the displayed best
+  float32 GEMV row reports 1.00x against itself.
 
 Six mutation patches in `tools/mutations/` are each detected by the suite. Dispatch tests
 check that AVX2 selects the AVX2 kernels, and threading tests check that the row split uses
@@ -212,10 +268,10 @@ Full tables are in [VERIFICATION.md](VERIFICATION.md).
   packed GEMM, so it is not competitive with oneDNN or BLAS for large batches.
 - **No accuracy claims on real models**: this repository contains no model weights, and the
   accuracy figures are on synthetic Gaussian data only.
-- **CI not yet run**: the workflow is configured to build and test on Apple silicon (portable
-  path), gcc, clang, both sanitizers and the aarch64 cross-build, and it passes `actionlint`,
-  but it has not run on GitHub. macOS / Apple silicon is NOT_RUN in the recorded Linux test
-  environment. The x86 macOS path uses the same code as Linux but is not covered by CI.
+- **Validation scope**: [VERIFICATION.md](VERIFICATION.md) separates earlier Linux checks
+  from native macOS checks dated 2026-10-03. Hosted Actions results are not verified by the local
+  record; the badge links to current workflow status. Apple silicon uses portable kernels, so
+  native macOS checks do not revalidate AVX2 timings. The x86 macOS path is not covered by CI.
 - **Tiny results lose precision**: when `max|w_row|·max|x_block|` is below about 2e-34, the
   per-block scale product underflows and the result is only accurate in absolute terms (it can
   be exactly 0). Real layers are many orders of magnitude above this.

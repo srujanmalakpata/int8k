@@ -78,6 +78,10 @@ if(INT8K_BUILD_TOOLS)
 endif()
 
 if(INT8K_BUILD_BENCH AND INT8K_BUILD_TOOLS)
+  add_test(NAME bench.baseline_self_ratio
+           COMMAND ${CMAKE_COMMAND} "-DBENCH=$<TARGET_FILE:int8k-bench>"
+                   "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/check_benchmark.cmake)
   int8k_expect_rejection(bench.rejects_bad_threads
     "--threads must be an integer in [0, 1024], got 'abc'"
     $<TARGET_FILE:int8k-bench> --threads abc)

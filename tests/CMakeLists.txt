@@ -78,6 +78,12 @@ if(INT8K_BUILD_TOOLS)
 endif()
 
 if(INT8K_BUILD_BENCH AND INT8K_BUILD_TOOLS)
+  # add_test splits list arguments, so pass the emulator command joined with '|'.
+  string(REPLACE ";" "|" int8k_bench_emulator "${CMAKE_CROSSCOMPILING_EMULATOR}")
+  add_test(NAME bench.baseline_self_ratio
+           COMMAND ${CMAKE_COMMAND} "-DBENCH=$<TARGET_FILE:int8k-bench>"
+                   "-DEMULATOR=${int8k_bench_emulator}"
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/check_benchmark.cmake)
   int8k_expect_rejection(bench.rejects_bad_threads
     "--threads must be an integer in [0, 1024], got 'abc'"
     $<TARGET_FILE:int8k-bench> --threads abc)

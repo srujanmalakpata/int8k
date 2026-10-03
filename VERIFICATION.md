@@ -1,5 +1,64 @@
 # int8k test record
 
+## Native macOS validation (2026-10-03)
+
+Host: macOS, `Darwin 27.0.0 arm64`; AppleClang 21.0.0, CMake 4.3.3,
+Ninja 1.13.2, cached GoogleTest 1.14.0. `int8k-cli info` reports 10 hardware threads,
+AVX2 unavailable and Auto selecting scalar. No hardware model or cache size was measured.
+The earlier Linux tables below remain historical measurements on their stated host.
+
+The original ASan preset forced `detect_leaks=1`, which aborts on Apple's runtime.
+The corrected `asan` test preset retains `abort_on_error=1` and the UBSan settings;
+the Linux-only `asan-linux` test preset adds explicit `detect_leaks=1`, and Linux CI
+selects it. Leak detection was **not run on macOS**.
+
+The benchmark previously measured the float32 scalar GEMV twice when Auto resolved to
+scalar, using one latency for the displayed row and another for the speedup denominator.
+It now reuses the displayed measurement. `bench.baseline_self_ratio` checks the best
+float32 GEMV row reports 1.00x against itself. This adds one end-to-end test; earlier
+Linux counts of 259 describe the suite before that addition.
+
+`GTEST_PREFIX` below denotes the existing local GoogleTest installation used through
+`CMAKE_PREFIX_PATH`; no packages were installed. Cached source and executable paths are
+abbreviated for readability. A successful cached-dependency build does not validate a
+fresh network download.
+
+| Command / check | Result | Observed output / limits |
+|---|---|---|
+| `cmake --preset release -DINT8K_FETCH_GTEST=ON && cmake --build --preset release --parallel && ctest --preset release --parallel 4` without a local GoogleTest | BLOCKED | Configure exits 1: GitHub download cannot resolve `github.com` in this sandbox; build and tests in that chain do not run. |
+| Same acceptance chain with `CMAKE_PREFIX_PATH="$GTEST_PREFIX"` supplied to configure | PASS | Project builds with `-Werror`; 260 discovered, 258 PASS, 2 existing AVX2-only SKIPPED, 0 failures. |
+| `./build/release/int8k-cli selfcheck --rows 513 --cols 4100 --threads 4` | PASS | `selfcheck: PASS`; INT8/INT4 scalar at 1 and 4 threads, oracle max absolute errors 3.9e-6 / 3e-6, SNR 40.16 / 20.48 dB. AVX2 unavailable. |
+| `debug`, `clang-release`, `portable`: `cmake --preset PRESET && cmake --build --preset PRESET --parallel && ctest --preset PRESET --parallel 4` with the same GoogleTest prefix | PASS | Each: 260 discovered, 258 PASS, 2 existing AVX2-only SKIPPED, 0 failures; corresponding 513x4100 / 4-thread selfchecks PASS. Both default and explicit Clang are AppleClang, not GCC parity. |
+| `asan`: configure/build as above, then `ctest --preset asan --parallel 4` | PASS | 257 discovered, 255 PASS, 2 existing AVX2-only SKIPPED; 0 failures or sanitizer reports. Benchmark disabled by this preset. No manual leak-setting override needed. |
+| `ASAN_OPTIONS=abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./build/asan/int8k-cli selfcheck --rows 513 --cols 4100 --threads 4` | PASS | `selfcheck: PASS`; no sanitizer reports. Leak checking NOT_RUN on macOS. |
+| `tsan`: configure/build as above, then `ctest --preset tsan --parallel 4` | PASS | 257 discovered, 255 PASS, 2 existing AVX2-only SKIPPED; 0 failures or ThreadSanitizer reports. |
+| `TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 ./build/tsan/int8k-cli selfcheck --rows 513 --cols 4100 --threads 4` | PASS | `selfcheck: PASS`; no ThreadSanitizer reports. |
+| FetchContent with cached GoogleTest source: `cmake --preset release -B build/fetchcontent -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON -DINT8K_FETCH_GTEST=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=<cached source>`, build, CTest with `--parallel 4` | PASS | Fallback exercised without network; one GoogleTest char8_t-to-char32_t warning (dependency not built with project `-Werror`); 260 discovered, 258 PASS, 2 existing AVX2-only SKIPPED, 0 failures. |
+| `find include src tests bench tools -name '*.hpp' -o -name '*.cpp'` piped to cached `clang-format --dry-run --Werror` | PASS | clang-format 18.1.8; no formatting violations. |
+| Cached `actionlint .github/workflows/ci.yml` | PASS | No findings. |
+| `./build/release/int8k-cli info` | PASS | `avx2 available: no`, `auto backend: scalar`, `hardware threads: 10`. |
+| `./build/release/int8k-bench --quick --reps 3 --threads 2` | PASS | Complete scalar GEMV/GEMM table; displayed best float32 row reports 1.00x. Smoke run only; its timings are not headline performance claims. |
+| `./build/release/int8k-cli quantize --rows 4096 --cols 4096 --format q4` and `--format int8` | PASS | INT4: 10,485,760 bytes, 6.40x, 20.27 dB. INT8: 16,793,600 bytes, 4.00x, 41.25 dB. Matches earlier Linux reconstruction measurements. |
+| `CMAKE_PREFIX_PATH="$GTEST_PREFIX" JOBS=4 tools/mutations/run_mutations.sh` with patches 2, 4 and 6 specified | PASS | All three portable mutations caught; failure counts below. |
+| Full six-patch mutation run and Linux AVX2/GCC matrix | NOT_RUN | This ARM macOS host cannot execute the AVX2 paths; `/usr/bin/g++` is AppleClang. Earlier Linux results are retained separately. |
+| `arm64-cross` Linux/QEMU job | NOT_RUN | Linux cross-GCC, QEMU and `/usr/src/googletest` unavailable on this host; native ARM macOS checks do not substitute for this job. |
+| `ctest --preset asan-linux --parallel 4` | NOT_RUN | Linux-only preset; explicit leak setting and CI selection inspected, but Linux LeakSanitizer execution requires a Linux host. |
+| Hosted GitHub Actions jobs | BLOCKED | Network/DNS access unavailable; no hosted result retrieved or workflow triggered. Local results do not establish current hosted CI status. |
+| README local-link/heading-anchor checks and JSON inspection of ASan presets | PASS | Local references resolve; portable preset omits forced leaks, Linux preset explicitly enables them. |
+| `git diff --check`, `git check-ignore` on all preset build trees, tracked-artifact inspection | PASS | No whitespace errors; build outputs ignored; no generated build artifacts tracked. Existing `.gitignore` sufficient; `.editorconfig` added. LICENSE unchanged. |
+
+Existing skips in each native suite: `Gemv.Avx2MatchesScalar` and
+`ReferenceF32.Avx2MatchesScalarForAllTailLengths`. These skips were not introduced or
+changed. AVX2-specific measurements and the three AVX2 mutations remain untested here.
+
+| Portable mutation | GoogleTest failures | CTest failures | Caught |
+|---|---|---|---|
+| 2: truncate instead of round | 5 | 5 of 260 | yes |
+| 4: drop last Q4 block in driver | 127 | 129 of 260 | yes |
+| 6: row split always one thread | 6 | 6 of 260 | yes |
+
+## Earlier Linux validation (2026-10-03)
+
 - **Date**: 2026-10-03. Each preset uses a clean build tree.
 - **Machine**: shared 4-vCPU Linux container (Ubuntu 24.04, Linux 6.18). `lscpu` reports
   an Intel Xeon @ 2.80 GHz with AVX2, FMA and AVX-512F, 4 MiB L2 (4 instances) and 33 MiB L3.

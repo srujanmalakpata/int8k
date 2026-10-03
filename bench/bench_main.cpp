@@ -75,7 +75,9 @@ void bench_gemv(const Shape& s, const Config& cfg) {
   const Backend best = resolve_backend(Backend::Auto);
   const std::string best_name(backend_name(best));
   const double f32_naive_ms = median_ms(cfg.reps, [&] { gemv_f32(wv, x, y, Backend::Scalar); });
-  const double f32_ms = median_ms(cfg.reps, [&] { gemv_f32(wv, x, y, best); });
+  const double f32_ms = best == Backend::Scalar
+                            ? f32_naive_ms
+                            : median_ms(cfg.reps, [&] { gemv_f32(wv, x, y, best); });
   print_row(s.name, "f32 gemv", "scalar", 1, 1, f32_naive_ms, flops, w.size() * sizeof(float),
             f32_ms);
   if (best != Backend::Scalar) {

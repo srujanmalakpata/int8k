@@ -136,8 +136,21 @@
         "outputOnFailure": true
       },
       "environment": {
-        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1",
+        "ASAN_OPTIONS": "abort_on_error=1",
         "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "asan-linux",
+      "inherits": "asan",
+      "displayName": "ASan + UBSan with Linux leak detection",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1"
       }
     },
     {

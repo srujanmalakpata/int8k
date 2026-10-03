@@ -1,4 +1,5 @@
 # The displayed best float32 GEMV latency must also be the speedup denominator.
+string(REPLACE "|" ";" EMULATOR "${EMULATOR}")
 execute_process(COMMAND ${EMULATOR} "${BENCH}" --quick --reps 3 --threads 1
                 RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)

@@ -1,0 +1,13 @@
+--- a/src/kernels_avx2.cpp
++++ b/src/kernels_avx2.cpp
+@@ -89,10 +89,6 @@
+     acc0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_set1_ps(ws * xs[b]), acc0);
+     acc1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d1), _mm256_set1_ps(ws * xs[b + 1]), acc1);
+   }
+-  if (b < blocks) {
+-    const __m256i d0 = dot32_epi32(load32(w + b * kBlockSize), load32(x + b * kBlockSize));
+-    acc0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_set1_ps(ws * xs[b]), acc0);
+-  }
+   return hsum(_mm256_add_ps(acc0, acc1));
+ }
+ 

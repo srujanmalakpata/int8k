@@ -1,0 +1,164 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release (default compiler)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "release",
+      "displayName": "Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "clang-release",
+      "inherits": "release",
+      "displayName": "Release with clang",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "portable",
+      "inherits": "release",
+      "displayName": "Release without x86 kernels (non-x86 fallback)",
+      "cacheVariables": {
+        "INT8K_PORTABLE": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "release",
+      "displayName": "ASan + UBSan (RelWithDebInfo)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "INT8K_SANITIZE": "ON",
+        "INT8K_BUILD_BENCH": "OFF"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "release",
+      "displayName": "ThreadSanitizer (RelWithDebInfo)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "INT8K_TSAN": "ON",
+        "INT8K_BUILD_BENCH": "OFF"
+      }
+    },
+    {
+      "name": "arm64-cross",
+      "inherits": "release",
+      "displayName": "aarch64 Linux cross-build (tests run under qemu-aarch64)",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/aarch64-linux-gnu.cmake",
+      "cacheVariables": {
+        "INT8K_FETCH_GTEST": "ON",
+        "FETCHCONTENT_SOURCE_DIR_GOOGLETEST": "/usr/src/googletest"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release"
+    },
+    {
+      "name": "portable",
+      "configurePreset": "portable"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "arm64-cross",
+      "configurePreset": "arm64-cross"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "portable",
+      "configurePreset": "portable",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "TSAN_OPTIONS": "halt_on_error=1:second_deadlock_stack=1"
+      }
+    },
+    {
+      "name": "arm64-cross",
+      "configurePreset": "arm64-cross",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 600
+      }
+    }
+  ]
+}

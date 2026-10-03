@@ -1,0 +1,12 @@
+--- a/src/parallel.hpp
++++ b/src/parallel.hpp
+@@ -24,7 +24,8 @@
+   const std::size_t by_work =
+       std::max<std::size_t>(1, rows / std::max<std::size_t>(1, min_rows_per_thread));
+   t = static_cast<unsigned>(std::min<std::size_t>(t, by_work));
+-  return std::max(1u, t);
++  (void)t;
++  return 1u;
+ }
+ 
+ /// Calls fn(begin, end) on `threads` contiguous, near-equal chunks of [0, rows). Chunk i runs on

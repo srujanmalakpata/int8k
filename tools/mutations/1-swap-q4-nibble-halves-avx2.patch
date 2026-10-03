@@ -1,0 +1,11 @@
+--- a/src/kernels_avx2.cpp
++++ b/src/kernels_avx2.cpp
+@@ -44,7 +44,7 @@
+   const __m128i mask = _mm_set1_epi8(0x0F);
+   const __m128i lo = _mm_and_si128(raw, mask);
+   const __m128i hi = _mm_and_si128(_mm_srli_epi16(raw, 4), mask);
+-  const __m256i codes = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
++  const __m256i codes = _mm256_inserti128_si256(_mm256_castsi128_si256(hi), lo, 1);
+   return _mm256_sub_epi8(codes, _mm256_set1_epi8(8));
+ }
+ 

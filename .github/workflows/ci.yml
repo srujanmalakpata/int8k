@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: clang-format check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format 18
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+      - name: Check formatting
+        run: |
+          find include src tests bench tools -name '*.hpp' -o -name '*.cpp' \
+            | xargs clang-format-18 --dry-run --Werror
+
+  linux:
+    name: Linux ${{ matrix.compiler }} (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cxx: g++
+            preset: release
+          - compiler: clang
+            cxx: clang++
+            preset: release
+          - compiler: gcc
+            cxx: g++
+            preset: debug
+          - compiler: gcc
+            cxx: g++
+            preset: portable
+    env:
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }} --parallel 4
+      - name: CLI self-check
+        run: ./build/${{ matrix.preset }}/int8k-cli selfcheck --rows 513 --cols 4100 --threads 4
+      - name: Benchmark smoke run (numbers from shared CI runners are not meaningful)
+        if: matrix.preset == 'release'
+        run: ./build/release/int8k-bench --quick --reps 3 --threads 2
+
+  sanitizers:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            preset: asan
+          - name: ThreadSanitizer
+            preset: tsan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev
+      - name: Lower ASLR entropy (TSan cannot map its shadow memory with 32 random bits)
+        if: matrix.preset == 'tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }} --parallel 4
+
+  arm64-cross:
+    name: Linux aarch64 cross-build (portable kernels, tests under QEMU)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross toolchain, QEMU and GoogleTest sources
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++-aarch64-linux-gnu qemu-user libgtest-dev
+      - name: Configure (builds GoogleTest for aarch64 from /usr/src/googletest)
+        run: cmake --preset arm64-cross
+      - name: Build
+        run: cmake --build --preset arm64-cross --parallel
+      - name: Test
+        run: ctest --preset arm64-cross --parallel 4
+
+  mutations:
+    name: Mutation tests (every patch in tools/mutations must be caught)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev
+      - name: Run mutations
+        run: JOBS=4 tools/mutations/run_mutations.sh
+
+  macos:
+    name: macOS (Apple silicon, portable kernels, fetched GoogleTest)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: brew install ninja || true
+      - name: Configure (exercises the FetchContent GoogleTest fallback)
+        run: cmake --preset release -DINT8K_FETCH_GTEST=ON
+      - name: Build
+        run: cmake --build --preset release --parallel
+      - name: Test
+        run: ctest --preset release --parallel 4

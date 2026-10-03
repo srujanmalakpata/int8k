@@ -1,0 +1,48 @@
+# Build trees (CMake presets put everything under build/)
+build/
+build-*/
+cmake-build-*/
+out/
+_deps/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+Testing/
+
+# Binaries and objects
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+bin/
+obj/
+target/
+dist/
+
+# Tooling / editors
+.cache/
+.clangd
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python helpers (none committed, but keep envs out)
+.venv/
+.uv-cache/
+__pycache__/
+
+# Profiling and coverage output
+perf.data*
+*.gcda
+*.gcno
+*.profraw
+coverage/
+
+# Large data / weights never belong in this repo
+*.bin
+*.gguf
+*.safetensors
+*.onnx

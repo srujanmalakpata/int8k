@@ -1,0 +1,11 @@
+--- a/src/quantize.cpp
++++ b/src/quantize.cpp
+@@ -39,7 +39,7 @@
+   if (scale == 0.0f) {
+     return 0;
+   }
+-  const float q = std::nearbyint(v / scale);
++  const float q = std::trunc(v / scale);
+   const auto limit = static_cast<float>(max_code);
+   return static_cast<int>(std::clamp(q, -limit, limit));
+ }
